@@ -1,0 +1,175 @@
+function get_temp() {
+  
+  
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  //The main function of the script, it receives date, country and city, extracting the day and month from the date, and calling the get_coordinates and check weather_functions
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  
+  function body(dates, country, city){
+    var date = new Date(dates);
+    var day = date.getDate();
+    if( day < 10){
+      var day = "0"+day;
+    } 
+    var month = date.getMonth()+1;
+    if( month < 10){
+      month = "0"+month;
+    }
+    var coord =  get_coordinates(country, city);
+    var station = getStation(coord[0], coord[1])
+    var check = getTemp(station, month, day);
+    return [day+"/"+month , check[1], check[0]+"%"];           
+  }
+  
+  
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  // this function will generate an array with the last 14 days 
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  
+  function get_lust_14_days(){   
+    var dates = []
+    var endDate = new Date ();
+    var startDate = new Date();
+    startDate.setDate( startDate.getDate() -13);
+    while (startDate.getTime() <= endDate.getTime() ) {
+      dates.push ( [new Date(startDate)] );
+      startDate.setDate( startDate.getDate() +1);
+    }
+    return dates
+  }
+  
+  
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  //this function uses mapquestapi to get the coordinates of the country or a city in the country ***NOTE: the api is limited to 1000 uses per day + it uses MY key
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  function get_coordinates(country,city){
+    var link = "http://www.mapquestapi.com/geocoding/v1/address?key=AYzQHAGezTNSnWOGUnNvrwyYTFJ9lkCH&location="+country+","+city+"&outformat=json";
+    var coordinates = UrlFetchApp.fetch(link, {muteHttpExceptions: true});
+    if (coordinates.getResponseCode() >= 200 && coordinates.getResponseCode() < 400){
+      var jcoor = JSON.parse(coordinates.getContentText());
+      var lat = jcoor.results[0].locations[0].displayLatLng.lat;
+      var lon = jcoor.results[0].locations[0].displayLatLng.lng;
+      return [lat, lon];    
+    }
+    else{
+      Logger.log("The city "+city+" in country "+country+" doesn't exist! Kindly check");
+      return["no_coord", "no_coord"]
+    }
+  }
+  
+  
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  // Function to get the closest station to the specified city
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  function getStation(lat, lon){
+    if(lat == "no_coord"){
+      Logger.log("There was a problem finding coordinates")
+       var stationID = "no_station";
+       return [humid.toFixed(), temp.toFixed()]
+    }
+    else{
+      Logger.log(lat , lon)
+      var stationLink = "https://api.meteostat.net/v1/stations/nearby?lat="+lat+"&lon="+lon+"&limit=1&key=Wskbui2k";
+      var stationList = UrlFetchApp.fetch(stationLink, {muteHttpExceptions: true});
+      if (stationList.getResponseCode()== 400){
+        Logger.log("the coordinates :\nlat="+lat+"\nlon="+lon+"\nDoesn't exist")
+        var stationID = "no_station";
+      }
+      else if(stationList.getResponseCode()== 403){
+        new Error("You have reached the limit of the api uses, please wait for an hour♥")
+      }
+      else{
+        var jsonStation = JSON.parse(stationList.getContentText())
+        if( jsonStation.data[0]){
+          var stationID = jsonStation.data[0].id; 
+        } 
+        else{
+          var stationID = "no_station";
+          Logger.log("No Station for:\nlat="+lat+"\nlon="+lon)
+        } 
+      }
+      return stationID;
+    };
+  };
+   
+  
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  // Function that getting from meteostat api weather information for a specific station for a specific day and returning the avarage humidity and temperature
+  // for 11AM to 13PM
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  
+  function getTemp(stationID, month, day){
+    if(stationID == "no_station"){
+      Logger.log("There was an error in the geStation() function, please check logs")
+      var humid = error
+      var temp = error 
+      return [humid, temp]
+    }
+    else{
+      var weatherLink = "https://api.meteostat.net/v1/history/hourly?station="+stationID+"&start=2020-"+month+"-"+day+"&end=2020-"+month+"-"+day+"&key=Wskbui2k"
+      var weatherList = UrlFetchApp.fetch(weatherLink, {muteHttpExceptions: true});
+      var jsonFullWeather = JSON.parse(weatherList.getContentText())
+      var jsonWeather = jsonFullWeather.data
+      if (!jsonFullWeather.data){
+        Loggger.log("There is no data for this day")
+        var humid = unknown
+        var temp = unknown 
+        return [humid, temp]
+      }
+      else{
+        var humid = 0
+        var temp = 0
+        var countHumid = 0
+        var countTemp = 0
+        for(var i in jsonWeather){
+          var hour = new Date(jsonWeather[i].time).getHours();
+          if(hour >= 11 && hour <= 13){
+            if(jsonWeather[i].humidity){
+              
+              humid= humid + jsonWeather[i].humidity;
+              countHumid++
+            };
+            if(jsonWeather[i].temperature){
+              
+              temp=temp + jsonWeather[i].temperature;
+              countTemp++
+            }
+          }
+          
+        };
+        humid = humid/countTemp
+        temp = temp/countHumid
+        Logger.log(temp)
+        return [humid.toFixed(), temp.toFixed()]
+      };
+    }; 
+  };
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  //                                                            THE SCRIPT!!!
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  //reading the country list in a sheet named "1", receiving an array of the last 14 dates  creating a sheet for every country and writing the data in each of them
+  //----------------------------------------------------------------------------------------------------------------------------------------------------------
+  
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var places = ss.getSheetByName ('1').getDataRange().getValues()
+  var dates = get_lust_14_days();
+  for(j=0;j<places.length;j++){
+    var stat = [["date", "temperature", "humidity"]]
+    var country = places[j][0]
+    var city = places[j][1]
+    for(i=0; i<dates.length; i++){
+      stat.push(body(dates[i], country, city));
+      
+    }
+    if(ss.getSheetByName(country+"/"+city)){
+      ss.getSheetByName(country+"/"+city).clear().getRange(1,1,stat.length,stat[0].length).setValues(stat);
+    }
+    else{
+      ss.insertSheet(country+"/"+city);
+      ss.getSheetByName(country+"/"+city).clear().getRange(1,1,stat.length,stat[0].length).setValues(stat);
+    }
+  
+  }
+}
